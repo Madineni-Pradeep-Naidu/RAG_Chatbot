@@ -1,0 +1,158 @@
+RAG (Retrieval-Augmented Generation) CHATBOT — PROJECT NOTES
+=============================================================
+
+OVERALL FLOW
+------------
+User Uploads Documents
+   -> Module 1: Extract Text
+   -> Module 2: Chunk Text
+   -> Module 3: Generate Embeddings
+   -> Module 4: Store Embeddings in FAISS
+User Asks Question
+   -> Module 5: Semantic Search
+   -> Relevant Chunks Retrieved
+   -> Module 6: LLM Generates Answer
+
+
+MODULE 1: DOCUMENT EXTRACTION
+-----------------------------
+Purpose: Read uploaded documents and extract text.
+
+Functions:
+- extract_pdf()   -> uses PdfReader() to read PDF pages as text.
+- extract_docx()  -> uses Document() to extract paragraphs and tables from Word files.
+- extract_txt()   -> reads .txt files via file_bytes.decode("utf-8").
+- extract_documents() -> combines all extraction methods.
+
+Output format:
+[
+  {
+    "text": "Leave policy details...",
+    "source": "handbook.pdf",
+    "page": 5
+  }
+]
+
+
+MODULE 2: TEXT CHUNKING
+-----------------------
+Purpose: Split large documents into smaller chunks (LLMs can't process very large text efficiently).
+
+Function: split_text()
+Parameters: chunk_size = 800, overlap = 150
+
+Why overlap?
+Without overlap, context gets cut across chunk boundaries (e.g., "Machine Learning" in one chunk, "uses Python" in the next). Overlap preserves context and improves retrieval.
+
+Function: create_chunks()
+Creates chunk metadata.
+
+Output format:
+{
+  "text": "chunk content",
+  "source": "policy.pdf",
+  "page": 3,
+  "chunk_id": 17
+}
+
+
+MODULE 3: EMBEDDING GENERATION
+------------------------------
+Purpose: Convert text chunks into vectors (numerical representations) so the system understands meaning.
+
+Model: all-MiniLM-L6-v2
+Output: 384-dimensional vector per chunk.
+
+Why embeddings?
+Keyword search fails when wording differs (e.g., question "How many vacation days?" vs document "20 annual leave days"). Embeddings capture semantic similarity — Vacation ≈ Annual Leave — so the correct chunk is retrieved.
+
+Code:
+embeddings = model.encode(texts, normalize_embeddings=True)
+
+Output shape: (number_of_chunks, 384)
+
+
+MODULE 4: FAISS VECTOR DATABASE
+-------------------------------
+Purpose: Store embeddings efficiently and perform fast similarity search.
+
+Why FAISS?
+Comparing a question against thousands of chunks manually is slow. FAISS performs fast similarity search.
+
+Function: create_faiss_index()
+index = faiss.IndexFlatIP()
+
+IP = Inner Product. Since embeddings are normalized, Inner Product ≈ Cosine Similarity.
+
+Adding vectors: index.add(embeddings)
+
+Storage files:
+- faiss_index.bin        -> stores vectors
+- chunks_metadata.pkl    -> stores chunk text + metadata
+   e.g., { "chunk_id": 25, "source": "policy.pdf", "page": 3,
+           "text": "Employees get 20 annual leave..." }
+
+
+MODULE 5: SEMANTIC SEARCH & RETRIEVAL
+-------------------------------------
+Purpose: Find the most relevant chunks for a user question. This is the core of RAG.
+
+Steps:
+1. Convert question to embedding: question_embedding = model.encode(question)
+2. Search FAISS:
+   scores, indices = index.search(question_embedding, top_k)
+   e.g., indices = [10, 27, 45, 2], scores = [0.89, 0.85, 0.80, 0.75]
+3. Retrieve the matching chunks (highest similarity first).
+
+Output format:
+[
+  {
+    "text": "Employees receive 20 leave days",
+    "similarity": 0.89
+  }
+]
+
+
+MODULE 6: LLM RESPONSE GENERATION
+---------------------------------
+Purpose: Use retrieved chunks as context and generate a final grounded answer.
+
+Context creation: Retrieved chunks are formatted with source and page info, then passed to the LLM.
+
+System prompt rules:
+- Use context only
+- No hallucinations
+- Don't invent facts
+- State when the answer is not found in documents
+
+LLM call: response = ollama.chat()  (model: llama3.2:latest)
+
+Example final output:
+"According to the uploaded documents, employees receive 20 annual leave days per year."
+
+
+DATABASE LOADING MODULE
+-----------------------
+Function: load_vector_database()
+On Streamlit restart, faiss_index.bin and chunks_metadata.pkl are loaded automatically, so users don't need to re-upload documents.
+
+
+SESSION STATE
+-------------
+st.session_state stores data temporarily across Streamlit reruns to prevent data loss.
+Stored items: documents, chunks, embeddings, faiss_index, search_results, generated_answer.
+
+
+INTERVIEW EXPLANATION (SHORT VERSION)
+-------------------------------------
+"This project is a document-based RAG chatbot built with Streamlit, Sentence Transformers, FAISS, and Ollama. Uploaded PDF, DOCX, and TXT files are processed through six modules: document extraction, text chunking, embedding generation using MiniLM, vector storage in FAISS, semantic retrieval, and response generation using Llama 3.2. The system retrieves contextually relevant chunks from the vector database and uses them as context for the LLM to generate accurate answers grounded in document content."
+
+
+TECHNOLOGIES USED
+-----------------
+Python, Streamlit, Sentence Transformers, FAISS, NumPy, Ollama, Llama 3.2, PyPDF, Python-docx, Pickle
+
+
+NOTE
+----
+This is a strong end-to-end GenAI + RAG project suitable for a Data Analyst / AI Engineer fresher resume. It demonstrates document processing, embeddings, vector databases, semantic search, and LLM integration.
