@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+venv/
+env/
+.env
+.env.*
+.streamlit/secrets.toml
+documents/
+vector_db/
+gemini_test.py
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
